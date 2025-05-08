@@ -3,6 +3,7 @@
 #include <string.h>
 #include "gui.h"
 #include "main.h"
+#include "memory.h"    // for MEMORY_SIZE
 
 void update_process_list(GuiData* gui_data) {
     gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->process_list))));
@@ -27,62 +28,45 @@ void update_process_list(GuiData* gui_data) {
 }
 
 void update_queue_lists(GuiData* gui_data) {
-    gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->ready_queue_list))));
-    gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->blocked_queue_list))));
-    GtkListStore* ready_store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->ready_queue_list)));
-    GtkListStore* blocked_store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->blocked_queue_list)));
+    // single Queue view: PID | State | Time in Q
+    GtkListStore* store =
+      GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->queue_list)));
+    gtk_list_store_clear(store);
     GtkTreeIter iter;
+    int now = gui_data->engine->clock_cycle;
 
-    for (int i = 0; i < (gui_data->engine->algorithm == 2 ? 4 : 1); i++) {
-        QueueNode* node = gui_data->engine->ready_queues[i].front;
-        while (node) {
-            gtk_list_store_append(ready_store, &iter);
-            gtk_list_store_set(ready_store, &iter,
-                               0, node->process->pcb.process_id,
-                               1, i,
-                               -1);
-            node = node->next;
-        }
-    }
+    for (int i = 0; i < gui_data->engine->process_count; i++) {
+        Process* p = gui_data->engine->processes[i];
+        // skip terminated if you like, or include with state "Terminated"
+        const char* state_str = p->pcb.state == READY   ? "Ready"   :
+                                p->pcb.state == RUNNING ? "Running" :
+                                p->pcb.state == BLOCKED ? "Blocked" : "Terminated";
+        int tiq = (p->pcb.state == RUNNING) ? 0
+                  : now - p->queue_arrival_cycle;
 
-    for (int i = 0; i < MAX_MUTEXES; i++) {
-        if (gui_data->engine->mutex_ctrl->locked[i]) {
-            QueueNode* node = gui_data->engine->mutex_ctrl->blocked_queues[i].front;
-            while (node) {
-                gtk_list_store_append(blocked_store, &iter);
-                gtk_list_store_set(blocked_store, &iter,
-                                   0, node->process->pcb.process_id,
-                                   1, i,
-                                   -1);
-                node = node->next;
-            }
-        }
-    }
-    QueueNode* gnode = gui_data->engine->mutex_ctrl->general_blocked.front;
-    while (gnode) {
-        gtk_list_store_append(blocked_store, &iter);
-        gtk_list_store_set(blocked_store, &iter,
-                           0, gnode->process->pcb.process_id,
-                           1, -1,
-                           -1);
-        gnode = gnode->next;
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter,
+            0, p->pcb.process_id,
+            1, state_str,
+            2, tiq,
+            -1);
     }
 }
 
 void update_memory_view(GuiData* gui_data) {
-    gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->memory_view))));
-    GtkListStore* store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->memory_view)));
+    GtkListStore* store =
+      GTK_LIST_STORE(gtk_tree_view_get_model(
+        GTK_TREE_VIEW(gui_data->memory_view)));
+    gtk_list_store_clear(store);
     GtkTreeIter iter;
 
-    for (int i = 0; i < gui_data->engine->memory->next_free; i++) {
-        if (gui_data->engine->memory->words[i].name[0]) {
-            gtk_list_store_append(store, &iter);
-            gtk_list_store_set(store, &iter,
-                               0, i,
-                               1, gui_data->engine->memory->words[i].name,
-                               2, gui_data->engine->memory->words[i].value,
-                               -1);
-        }
+    for (int i = 0; i < MEMORY_SIZE; i++) {
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter,
+            0, i,
+            1, gui_data->engine->memory->words[i].name,
+            2, gui_data->engine->memory->words[i].value,
+            -1);
     }
 }
 
@@ -213,8 +197,9 @@ void on_reset_clicked(GtkButton* button, gpointer user_data) {
                     gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(gui_data->quantum_spin)));
 
     gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->process_list))));
-    gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->ready_queue_list))));
-    gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->blocked_queue_list))));
+    // clear the combined Queue view
+    gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(
+        GTK_TREE_VIEW(gui_data->queue_list))));
     gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->memory_view))));
     gtk_list_store_clear(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(gui_data->mutex_status))));
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(gui_data->log_view)), "", -1);
@@ -325,6 +310,32 @@ void on_algorithm_changed(GtkComboBox* combo, gpointer user_data) {
     update_dashboard(gui_data);
 }
 
+GuiData* global_gui = NULL;
+
+// Pops up a small modal dialog with a GtkEntry, returns a malloc'd string
+char* ask_for_input_dialog(const char* prompt) {
+  GtkWidget *dialog = gtk_dialog_new_with_buttons(
+      prompt,
+      GTK_WINDOW(global_gui->window),
+      GTK_DIALOG_MODAL|GTK_DIALOG_DESTROY_WITH_PARENT,
+      "_OK", GTK_RESPONSE_OK,
+      NULL);
+  GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+  GtkWidget *entry   = gtk_entry_new();
+  gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+  gtk_box_pack_start(GTK_BOX(content), entry, TRUE, TRUE, 8);
+  gtk_widget_show_all(dialog);
+  gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+
+  char* result = strdup("");
+  if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+    const char *txt = gtk_entry_get_text(GTK_ENTRY(entry));
+    result = strdup(txt);
+  }
+  gtk_widget_destroy(dialog);
+  return result;
+}
+
 void create_gtk_gui(SimulationEngine* engine) {
     gtk_init(NULL, NULL);
     GuiData* gui_data = g_malloc0(sizeof(GuiData));
@@ -389,8 +400,15 @@ void create_gtk_gui(SimulationEngine* engine) {
     // Process and Queue Lists
     GtkWidget* lists_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 
+    // ── Process List Panel ─────────────────────────────────────────────
+    GtkWidget* proc_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget* proc_header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(proc_header), "<b>Process List</b>");
+    gtk_box_pack_start(GTK_BOX(proc_panel), proc_header, FALSE, FALSE, 2);
+
     gui_data->process_list = gtk_tree_view_new();
-    GtkListStore* process_store = gtk_list_store_new(6, G_TYPE_INT, G_TYPE_STRING, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT);
+    GtkListStore* process_store = gtk_list_store_new(6,
+        G_TYPE_INT, G_TYPE_STRING, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT);
     gtk_tree_view_set_model(GTK_TREE_VIEW(gui_data->process_list), GTK_TREE_MODEL(process_store));
     gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->process_list), gtk_tree_view_column_new_with_attributes("PID", gtk_cell_renderer_text_new(), "text", 0, NULL));
     gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->process_list), gtk_tree_view_column_new_with_attributes("State", gtk_cell_renderer_text_new(), "text", 1, NULL));
@@ -400,39 +418,79 @@ void create_gtk_gui(SimulationEngine* engine) {
     gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->process_list), gtk_tree_view_column_new_with_attributes("Mem Upper", gtk_cell_renderer_text_new(), "text", 5, NULL));
     GtkWidget* process_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(process_scroll), gui_data->process_list);
-    gtk_box_pack_start(GTK_BOX(lists_box), process_scroll, TRUE, TRUE, 5);
+    gtk_box_pack_start(GTK_BOX(proc_panel), process_scroll, TRUE, TRUE, 2);
+    gtk_box_pack_start(GTK_BOX(lists_box), proc_panel, TRUE, TRUE, 5);
 
-    gui_data->ready_queue_list = gtk_tree_view_new();
-    GtkListStore* ready_queue_store = gtk_list_store_new(2, G_TYPE_INT, G_TYPE_INT);
-    gtk_tree_view_set_model(GTK_TREE_VIEW(gui_data->ready_queue_list), GTK_TREE_MODEL(ready_queue_store));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->ready_queue_list), gtk_tree_view_column_new_with_attributes("PID", gtk_cell_renderer_text_new(), "text", 0, NULL));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->ready_queue_list), gtk_tree_view_column_new_with_attributes("Queue", gtk_cell_renderer_text_new(), "text", 1, NULL));
-    GtkWidget* ready_queue_scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_container_add(GTK_CONTAINER(ready_queue_scroll), gui_data->ready_queue_list);
-    gtk_box_pack_start(GTK_BOX(lists_box), ready_queue_scroll, TRUE, TRUE, 5);
+    // ── Queue Panel ────────────────────────────────────────────────────
+    GtkWidget* queue_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget* queue_header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(queue_header), "<b>Queue</b>");
+    gtk_box_pack_start(GTK_BOX(queue_panel), queue_header, FALSE, FALSE, 2);
 
-    gui_data->blocked_queue_list = gtk_tree_view_new();
-    GtkListStore* blocked_queue_store = gtk_list_store_new(2, G_TYPE_INT, G_TYPE_INT);
-    gtk_tree_view_set_model(GTK_TREE_VIEW(gui_data->blocked_queue_list), GTK_TREE_MODEL(blocked_queue_store));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->blocked_queue_list), gtk_tree_view_column_new_with_attributes("PID", gtk_cell_renderer_text_new(), "text", 0, NULL));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->blocked_queue_list), gtk_tree_view_column_new_with_attributes("Resource", gtk_cell_renderer_text_new(), "text", 1, NULL));
-    GtkWidget* blocked_queue_scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_container_add(GTK_CONTAINER(blocked_queue_scroll), gui_data->blocked_queue_list);
-    gtk_box_pack_start(GTK_BOX(lists_box), blocked_queue_scroll, TRUE, TRUE, 5);
+    gui_data->queue_list = gtk_tree_view_new();
+    // columns: PID, State, Time in Q
+    GtkListStore* queue_store = gtk_list_store_new(3,
+        G_TYPE_INT,    /* PID */
+        G_TYPE_STRING, /* State */
+        G_TYPE_INT);   /* Time in Q */
+    gtk_tree_view_set_model(GTK_TREE_VIEW(gui_data->queue_list),
+                            GTK_TREE_MODEL(queue_store));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->queue_list),
+        gtk_tree_view_column_new_with_attributes("PID",
+            gtk_cell_renderer_text_new(), "text", 0, NULL));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->queue_list),
+        gtk_tree_view_column_new_with_attributes("State",
+            gtk_cell_renderer_text_new(), "text", 1, NULL));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->queue_list),
+        gtk_tree_view_column_new_with_attributes("Time in Q",
+            gtk_cell_renderer_text_new(), "text", 2, NULL));
+
+    GtkWidget* queue_scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_container_add(GTK_CONTAINER(queue_scroll), gui_data->queue_list);
+    gtk_box_pack_start(GTK_BOX(queue_panel), queue_scroll, TRUE, TRUE, 2);
+    gtk_box_pack_start(GTK_BOX(lists_box), queue_panel, TRUE, TRUE, 5);
+
     gtk_box_pack_start(GTK_BOX(main_box), lists_box, TRUE, TRUE, 5);
 
-    // Memory and Mutex
-    GtkWidget* mem_mutex_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    // ── Memory Viewer Panel ────────────────────────────────────────────
+    GtkWidget* memory_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget* memory_header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(memory_header), "<b>Memory Viewer</b>");
+    gtk_box_pack_start(GTK_BOX(memory_panel), memory_header, FALSE, FALSE, 2);
 
+    // TreeView & ListStore for 60 words
     gui_data->memory_view = gtk_tree_view_new();
-    GtkListStore* memory_store = gtk_list_store_new(3, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING);
-    gtk_tree_view_set_model(GTK_TREE_VIEW(gui_data->memory_view), GTK_TREE_MODEL(memory_store));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->memory_view), gtk_tree_view_column_new_with_attributes("Index", gtk_cell_renderer_text_new(), "text", 0, NULL));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->memory_view), gtk_tree_view_column_new_with_attributes("Name", gtk_cell_renderer_text_new(), "text", 1, NULL));
-    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->memory_view), gtk_tree_view_column_new_with_attributes("Value", gtk_cell_renderer_text_new(), "text", 2, NULL));
+    GtkListStore* memory_store = gtk_list_store_new(3,
+    G_TYPE_INT,    /* Index */
+    G_TYPE_STRING, /* Name  */
+    G_TYPE_STRING  /* Value */
+  );
+    gtk_tree_view_set_model(GTK_TREE_VIEW(gui_data->memory_view),
+                        GTK_TREE_MODEL(memory_store));
+
+    // Columns: Index, Name, Value
+    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->memory_view),
+    gtk_tree_view_column_new_with_attributes("Index",
+        gtk_cell_renderer_text_new(),
+        "text", 0, NULL));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->memory_view),
+    gtk_tree_view_column_new_with_attributes("Name",
+        gtk_cell_renderer_text_new(),
+        "text", 1, NULL));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->memory_view),
+    gtk_tree_view_column_new_with_attributes("Value",
+        gtk_cell_renderer_text_new(),
+        "text", 2, NULL));
+
     GtkWidget* memory_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(memory_scroll), gui_data->memory_view);
-    gtk_box_pack_start(GTK_BOX(mem_mutex_box), memory_scroll, TRUE, TRUE, 5);
+    gtk_box_pack_start(GTK_BOX(memory_panel), memory_scroll, TRUE, TRUE, 2);
+
+    // ── Mutex Status Panel ─────────────────────────────────────────────
+    GtkWidget* mutex_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget* mutex_header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(mutex_header), "<b>Mutex Status</b>");
+    gtk_box_pack_start(GTK_BOX(mutex_panel), mutex_header, FALSE, FALSE, 2);
 
     gui_data->mutex_status = gtk_tree_view_new();
     GtkListStore* mutex_store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
@@ -441,15 +499,27 @@ void create_gtk_gui(SimulationEngine* engine) {
     gtk_tree_view_append_column(GTK_TREE_VIEW(gui_data->mutex_status), gtk_tree_view_column_new_with_attributes("Status", gtk_cell_renderer_text_new(), "text", 1, NULL));
     GtkWidget* mutex_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(mutex_scroll), gui_data->mutex_status);
-    gtk_box_pack_start(GTK_BOX(mem_mutex_box), mutex_scroll, TRUE, TRUE, 5);
+    gtk_box_pack_start(GTK_BOX(mutex_panel), mutex_scroll, TRUE, TRUE, 2);
+
+    // pack memory & mutex side by side
+    GtkWidget* mem_mutex_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start(GTK_BOX(mem_mutex_box), memory_panel, TRUE, TRUE, 5);
+    gtk_box_pack_start(GTK_BOX(mem_mutex_box), mutex_panel, TRUE, TRUE, 5);
     gtk_box_pack_start(GTK_BOX(main_box), mem_mutex_box, TRUE, TRUE, 5);
 
-    // Log View
+    // ── Log & Console Panel ────────────────────────────────────────────
     gui_data->log_view = gtk_text_view_new();
     gtk_text_view_set_editable(GTK_TEXT_VIEW(gui_data->log_view), FALSE);
     GtkWidget* log_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(log_scroll), gui_data->log_view);
-    gtk_box_pack_start(GTK_BOX(main_box), log_scroll, TRUE, TRUE, 5);
+    // add title
+    GtkWidget* log_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget* log_header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(log_header), "<b>Execution Log</b>");
+    gtk_box_pack_start(GTK_BOX(log_panel), log_header, FALSE, FALSE, 2);
+
+    gtk_box_pack_start(GTK_BOX(log_panel), log_scroll, TRUE, TRUE, 5);
+    gtk_box_pack_start(GTK_BOX(main_box), log_panel, TRUE, TRUE, 5);
 
     update_process_list(gui_data);
     update_queue_lists(gui_data);
@@ -457,6 +527,7 @@ void create_gtk_gui(SimulationEngine* engine) {
     update_mutex_status(gui_data);
     update_dashboard(gui_data);
 
+    global_gui = gui_data;    // now C code can log or ask here
     gtk_widget_show_all(gui_data->window);
     gtk_main();
 }

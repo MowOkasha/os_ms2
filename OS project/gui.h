@@ -8,8 +8,7 @@ typedef struct {
     SimulationEngine* engine;
     GtkWidget*        window;
     GtkWidget*        process_list;
-    GtkWidget*        ready_queue_list;
-    GtkWidget*        blocked_queue_list;
+    GtkWidget*        queue_list;          // single combined queue view
     GtkWidget*        memory_view;
     GtkWidget*        mutex_status;
     GtkWidget*        log_view;
@@ -47,5 +46,8 @@ void on_step_clicked       (GtkButton* button, gpointer user_data);
 void on_auto_clicked       (GtkButton* button, gpointer user_data);
 void on_add_process_clicked(GtkButton* button, gpointer user_data);
 void on_algorithm_changed  (GtkComboBox* combo, gpointer user_data);
+
+extern GuiData*           global_gui;
+char* ask_for_input_dialog(const char* prompt);
 
 #endif // GUI_H
