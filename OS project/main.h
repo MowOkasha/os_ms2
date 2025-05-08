@@ -3,7 +3,7 @@
 
 #include "memory.h"
 
-#define MAX_MUTEXES 10
+#define MAX_MUTEXES    3   // userInput, userOutput, file
 
 /* process states */
 typedef enum {
@@ -25,19 +25,21 @@ typedef struct {
 
 /* process control block */
 typedef struct Process {
-    PCB   pcb;
-    int   instruction_start;
-    int   variable_start;
-    int   pcb_start;
-    int   instruction_count;
-    int   quantum_used;
-    int   remaining_time;
+    PCB     pcb;
+    int     instruction_start;   // where code begins in memory.words[]
+    int     instruction_count;   // # of instructions loaded
+    int     pcb_start;           // index in memory.words[] where PCB data begins
+    int     quantum_used;
+    int     remaining_time;
+
+    // cycle when this proc last entered a ready/blocked queue
+    int     queue_arrival_cycle;
 } Process;
 
 /* queue node */
 typedef struct QueueNode {
-    Process*           process;
-    struct QueueNode*  next;
+    struct QueueNode* next;
+    Process*          process;
 } QueueNode;
 
 /* simple FIFO queue */
@@ -80,6 +82,7 @@ void     init_simulation(SimulationEngine* engine,
 
 /* queue operations */
 void     init_queue(Queue* queue);
+void     enqueue(Queue* queue, Process* process);
 Process* dequeue(Queue* queue, int param);
 
 /* instruction execution & logging */
@@ -94,12 +97,10 @@ void     log_cycle(SimulationEngine* engine,
 
 /* --- functions used by gui.c --- */
 Process* select_next_process(SimulationEngine* engine);
-int      execute_cycle         (SimulationEngine* engine,
-                                Process*          current_proc);
-void     enqueue               (Queue*             queue,
-                                Process*           process);
+int      execute_cycle(SimulationEngine* engine,
+                       Process* current_proc);
 
 /* utility */
-#define  MAX_LINE_LENGTH 256
+#define MAX_LINE_LENGTH 256
 
 #endif // MAIN_H

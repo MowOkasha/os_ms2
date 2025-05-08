@@ -1,5 +1,5 @@
 #include "memory.h"
-#include "main.h"       // <<< pull in the full definition of struct Process
+#include "main.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,12 +40,35 @@ int check_boundaries(struct Process* proc, int address) {
     return (address >= proc->pcb.memory_lower && address <= proc->pcb.memory_upper) ? 0 : -1;
 }
 
-int get_variable(Memory* mem, struct Process* proc, const char* var_name, char* value) {
-    // stub: always fail
+/*
+ * Find a variable in this proc’s memory segment.
+ * Returns 0+copies into `value` on success, -1 if not found.
+ */
+int get_variable(Memory* mem, Process* proc, const char* var_name, char* value) {
+    for (int i = proc->pcb.memory_lower; i <= proc->pcb.memory_upper; i++) {
+        if (strcmp(mem->words[i].name, var_name) == 0) {
+            strncpy(value, mem->words[i].value, MAX_VALUE-1);
+            value[MAX_VALUE-1] = '\0';
+            return 0;
+        }
+    }
     return -1;
 }
 
-int set_variable(Memory* mem, struct Process* proc, const char* var_name, const char* value) {
-    // stub: always fail
+/*
+ * Store (or overwrite) a variable in this proc’s memory segment.
+ * Returns 0 on success, -1 if there was no free slot.
+ */
+int set_variable(Memory* mem, Process* proc, const char* var_name, const char* value) {
+    for (int i = proc->pcb.memory_lower; i <= proc->pcb.memory_upper; i++) {
+        // either overwrite existing or pick the first empty slot
+        if (mem->words[i].name[0]=='\0' || strcmp(mem->words[i].name, var_name)==0) {
+            strncpy(mem->words[i].name,  var_name, MAX_NAME-1);
+            mem->words[i].name[MAX_NAME-1] = '\0';
+            strncpy(mem->words[i].value, value, MAX_VALUE-1);
+            mem->words[i].value[MAX_VALUE-1] = '\0';
+            return 0;
+        }
+    }
     return -1;
 }
